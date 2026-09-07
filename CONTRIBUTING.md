@@ -1,6 +1,8 @@
 # Contributing to RepoLens
 
-Thanks for contributing.
+Thanks for contributing to RepoLens.
+
+**Maintainer:** Pavan Kumar BN
 
 ## Before opening a change
 
@@ -25,3 +27,7 @@ Prefer repository conventions that work across ecosystems instead of assumptions
 ## Pull requests
 
 Keep pull requests focused. Describe the behavior change, testing performed, and any compatibility impact.
+
+## Attribution
+
+Project maintainer and original author: **Pavan Kumar BN**.
