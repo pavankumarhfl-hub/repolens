@@ -24,3 +24,14 @@ jobs:
         run: python -m pip install .
       - name: Smoke test installed CLI
         run: repolens . --format json
+      - name: Smoke test GitHub Action
+        id: action
+        uses: ./
+        with:
+          path: .
+          format: json
+          min-score: "0"
+      - name: Validate action output
+        env:
+          SCORE: ${{ steps.action.outputs.score }}
+        run: test -n "$SCORE"
