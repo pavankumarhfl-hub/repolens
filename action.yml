@@ -1,0 +1,50 @@
+name: RepoLens
+
+description: Check repository engineering health and enforce a minimum score.
+author: Pavankumar
+
+branding:
+  icon: search
+  color: purple
+
+inputs:
+  path:
+    description: Repository path to inspect.
+    required: false
+    default: "."
+  min-score:
+    description: Minimum acceptable engineering-health score from 0 to 100.
+    required: false
+    default: "0"
+  format:
+    description: Report format: text, json, or sarif.
+    required: false
+    default: "text"
+
+outputs:
+  score:
+    description: RepoLens engineering-health score.
+    value: ${{ steps.scan.outputs.score }}
+
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_MIN_SCORE: ${{ inputs.min-score }}
+        INPUT_FORMAT: ${{ inputs.format }}
+      run: |
+        set -euo pipefail
+        export PYTHONPATH="$GITHUB_ACTION_PATH/src${PYTHONPATH:+:$PYTHONPATH}"
+        if [[ "$INPUT_FORMAT" == "json" ]]; then
+          python "$GITHUB_ACTION_PATH/src/repolens.py" "$INPUT_PATH" --format json > "$RUNNER_TEMP/repolens.json"
+          score="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["score"])' "$RUNNER_TEMP/repolens.json")"
+          cat "$RUNNER_TEMP/repolens.json"
+        else
+          python "$GITHUB_ACTION_PATH/src/repolens.py" "$INPUT_PATH" --format "$INPUT_FORMAT"
+          score="$(python "$GITHUB_ACTION_PATH/src/repolens.py" "$INPUT_PATH" --format json | python -c 'import json,sys; print(json.load(sys.stdin)["score"])')"
+        fi
+        echo "score=$score" >> "$GITHUB_OUTPUT"
+        python "$GITHUB_ACTION_PATH/src/repolens.py" "$INPUT_PATH" --format json --min-score "$INPUT_MIN_SCORE" > /dev/null
