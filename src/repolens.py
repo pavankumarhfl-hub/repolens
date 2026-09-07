@@ -44,9 +44,8 @@ def exists(root: Path, *paths: str) -> bool:
     return any((root / path).exists() for path in paths)
 
 
-def nonempty_file(root: Path, path: str) -> bool:
-    target = root / path
-    return target.is_file() and target.stat().st_size > 0
+def nonempty_file(root: Path, *paths: str) -> bool:
+    return any((root / path).is_file() and (root / path).stat().st_size > 0 for path in paths)
 
 
 def has_workflow(root: Path) -> bool:
