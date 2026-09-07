@@ -1,16 +1,20 @@
 from pathlib import Path
 
-from repolens import result, run_checks, score
+from repolens import result, run_checks, sarif, score
 
 
-def test_full_hygiene_scores_100(tmp_path: Path):
-    for name in ("README.md", "LICENSE", ".gitignore", ".env.example"):
-        (tmp_path / name).write_text("x", encoding="utf-8")
-    (tmp_path / "tests").mkdir()
-    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+def make_healthy_repo(root: Path) -> None:
+    for name in ("README.md", "LICENSE", ".gitignore", ".env.example", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md", "pyproject.toml", "poetry.lock"):
+        (root / name).write_text("x", encoding="utf-8")
+    (root / "tests").mkdir()
+    (root / "src").mkdir()
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / ".github" / "workflows" / "ci.yml").write_text("name: CI", encoding="utf-8")
 
+
+def test_healthy_repository_scores_100(tmp_path: Path):
+    make_healthy_repo(tmp_path)
     checks = run_checks(tmp_path)
-
     assert all(check.passed for check in checks)
     assert score(checks) == 100
 
@@ -18,10 +22,26 @@ def test_full_hygiene_scores_100(tmp_path: Path):
 def test_empty_repository_scores_zero(tmp_path: Path):
     checks = run_checks(tmp_path)
     assert score(checks) == 0
+    assert len(checks) == 12
 
 
-def test_result_is_machine_readable(tmp_path: Path):
+def test_result_contains_categories_and_summary(tmp_path: Path):
     data = result(tmp_path)
-    assert data["version"] == "0.2.0"
-    assert data["summary"]["total"] == 6
-    assert len(data["checks"]) == 6
+    assert data["version"] == "0.3.0"
+    assert data["summary"]["total"] == 12
+    assert data["summary"]["failed"] == 12
+    assert "security" in data["categories"]
+
+
+def test_sarif_reports_failed_rules(tmp_path: Path):
+    data = result(tmp_path)
+    report = sarif(data)
+    assert report["version"] == "2.1.0"
+    assert report["runs"][0]["tool"]["driver"]["name"] == "RepoLens"
+    assert len(report["runs"][0]["results"]) == 12
+
+
+def test_project_metadata_is_ecosystem_aware(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    checks = {check.id: check for check in run_checks(tmp_path)}
+    assert checks["project.metadata"].passed
