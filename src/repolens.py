@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,7 @@ class Check:
     category: str
     name: str
     passed: bool
+    applicable: bool
     severity: str
     detail: str
 
@@ -27,12 +28,10 @@ class Rule:
     severity: str
     detail: str
     predicate: Callable[[Path], bool]
+    applicable: Callable[[Path], bool] = lambda _r: True
 
 
-PROJECT_FILES = (
-    "pyproject.toml", "package.json", "go.mod", "Cargo.toml", "pom.xml",
-    "build.gradle", "build.gradle.kts", "composer.json", "Gemfile", "mix.exs",
-)
+PROJECT_FILES = ("pyproject.toml", "package.json", "go.mod", "Cargo.toml", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "Gemfile", "mix.exs")
 SOURCE_DIRS = ("src", "app", "lib", "cmd", "packages")
 TEST_DIRS = ("tests", "test", "spec")
 
@@ -59,16 +58,14 @@ def has_source(root: Path) -> bool:
         return True
     extensions = {".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".cs", ".rb", ".php"}
     ignored = {".git", ".venv", "venv", "node_modules", "dist", "build"}
-    for path in root.rglob("*"):
-        if any(part in ignored for part in path.parts):
-            continue
-        if path.is_file() and path.suffix in extensions and path.stat().st_size > 0:
-            return True
-    return False
+    return any(not any(part in ignored for part in path.parts) and path.is_file() and path.suffix in extensions and path.stat().st_size > 0 for path in root.rglob("*"))
+
+
+def lock_applicable(root: Path) -> bool:
+    return exists(root, "Pipfile", "package.json", "go.mod", "Cargo.toml", "composer.json")
 
 
 def has_ecosystem_lock(root: Path) -> bool:
-    """Check lockfiles only for ecosystems with a conventional lock mechanism."""
     ecosystems = {
         "Pipfile": ("Pipfile.lock",),
         "package.json": ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb"),
@@ -77,8 +74,6 @@ def has_ecosystem_lock(root: Path) -> bool:
         "composer.json": ("composer.lock",),
     }
     detected = [locks for project, locks in ecosystems.items() if (root / project).exists()]
-    if not detected:
-        return True
     return any(any((root / lock).is_file() and (root / lock).stat().st_size > 0 for lock in locks) for locks in detected)
 
 
@@ -91,7 +86,7 @@ def build_rules() -> tuple[Rule, ...]:
         Rule("testing.tests", "testing", "Automated tests", "high", "Add a non-empty test suite.", lambda r: has_nonempty_dir(r, *TEST_DIRS)),
         Rule("delivery.ci", "delivery", "Continuous integration", "high", "Add a CI workflow.", has_workflow),
         Rule("project.metadata", "project", "Project metadata", "medium", "Add standard project metadata.", lambda r: exists(r, *PROJECT_FILES)),
-        Rule("dependencies.lock", "reliability", "Dependency lock", "medium", "Use a lockfile when the detected ecosystem convention supports one.", has_ecosystem_lock),
+        Rule("dependencies.lock", "reliability", "Dependency lock", "medium", "Use a lockfile when the detected ecosystem convention supports one.", has_ecosystem_lock, lock_applicable),
         Rule("engineering.source", "engineering", "Source tree", "medium", "Include identifiable, non-empty application/library source code.", has_source),
         Rule("documentation.security", "security", "Security policy", "medium", "Add SECURITY.md with responsible disclosure guidance.", lambda r: nonempty_file(r, "SECURITY.md")),
         Rule("community.contributing", "community", "Contribution guide", "low", "Add CONTRIBUTING.md to make contributions easier.", lambda r: nonempty_file(r, "CONTRIBUTING.md")),
@@ -102,42 +97,38 @@ def build_rules() -> tuple[Rule, ...]:
 def run_checks(root: Path) -> list[Check]:
     checks: list[Check] = []
     for rule in build_rules():
-        passed = bool(rule.predicate(root))
-        checks.append(Check(rule.id, rule.category, rule.name, passed, rule.severity, "Present" if passed else rule.detail))
+        applicable = bool(rule.applicable(root))
+        passed = bool(rule.predicate(root)) if applicable else False
+        detail = "Present" if passed else ("Not applicable" if not applicable else rule.detail)
+        checks.append(Check(rule.id, rule.category, rule.name, passed, applicable, rule.severity, detail))
     return checks
 
 
 def score(checks: list[Check]) -> int:
     weights = {"high": 3, "medium": 2, "low": 1}
-    total = sum(weights[c.severity] for c in checks)
-    earned = sum(weights[c.severity] for c in checks if c.passed)
-    return round(100 * earned / total) if total else 0
+    applicable = [c for c in checks if c.applicable]
+    total = sum(weights[c.severity] for c in applicable)
+    earned = sum(weights[c.severity] for c in applicable if c.passed)
+    return round(100 * earned / total) if total else 100
 
 
 def result(root: Path) -> dict:
     checks = run_checks(root)
     by_category: dict[str, dict[str, int]] = {}
     for check in checks:
-        bucket = by_category.setdefault(check.category, {"passed": 0, "total": 0})
-        bucket["total"] += 1
-        bucket["passed"] += int(check.passed)
-    return {
-        "version": VERSION,
-        "path": str(root.resolve()),
-        "score": score(checks),
-        "summary": {"passed": sum(c.passed for c in checks), "failed": sum(not c.passed for c in checks), "total": len(checks)},
-        "categories": by_category,
-        "checks": [asdict(c) for c in checks],
-    }
+        bucket = by_category.setdefault(check.category, {"passed": 0, "failed": 0, "not_applicable": 0})
+        if not check.applicable:
+            bucket["not_applicable"] += 1
+        elif check.passed:
+            bucket["passed"] += 1
+        else:
+            bucket["failed"] += 1
+    return {"version": VERSION, "path": str(root.resolve()), "score": score(checks), "summary": {"passed": sum(c.passed for c in checks), "failed": sum(c.applicable and not c.passed for c in checks), "not_applicable": sum(not c.applicable for c in checks), "total": len(checks)}, "categories": by_category, "checks": [asdict(c) for c in checks]}
 
 
 def sarif(data: dict) -> dict:
-    rules = []
-    results = []
-    for check in data["checks"]:
-        rules.append({"id": check["id"], "shortDescription": {"text": check["name"]}, "help": {"text": check["detail"]}})
-        if not check["passed"]:
-            results.append({"ruleId": check["id"], "level": "warning" if check["severity"] != "high" else "error", "message": {"text": check["detail"]}})
+    rules = [{"id": c["id"], "shortDescription": {"text": c["name"]}, "help": {"text": c["detail"]}} for c in data["checks"]]
+    results = [{"ruleId": c["id"], "level": "warning" if c["severity"] != "high" else "error", "message": {"text": c["detail"]}} for c in data["checks"] if c["applicable"] and not c["passed"]]
     return {"version": "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "runs": [{"tool": {"driver": {"name": "RepoLens", "version": VERSION, "rules": rules}}, "results": results}]}
 
 
@@ -148,13 +139,11 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Compatibility alias for --format json")
     parser.add_argument("--min-score", type=int, metavar="N", help="Exit 2 when the score is below N")
     args = parser.parse_args()
-
     root = Path(args.path).expanduser()
     if not root.is_dir():
         parser.error(f"not a directory: {root}")
     if args.min_score is not None and not 0 <= args.min_score <= 100:
         parser.error("--min-score must be between 0 and 100")
-
     data = result(root)
     output_format = "json" if args.json else args.format
     if output_format == "json":
@@ -164,9 +153,8 @@ def main() -> int:
     else:
         print(f"RepoLens {data['version']} — score {data['score']}/100")
         for check in data["checks"]:
-            marker = "PASS" if check["passed"] else "FAIL"
+            marker = "PASS" if check["passed"] else ("N/A" if not check["applicable"] else "FAIL")
             print(f"[{marker}] {check['severity'].upper():6} {check['category']:<14} {check['name']}: {check['detail']}")
-
     return 2 if args.min_score is not None and data["score"] < args.min_score else 0
 
 
