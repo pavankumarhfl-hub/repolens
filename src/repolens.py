@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class Rule:
     name: str
     severity: str
     detail: str
-    predicate: object
+    predicate: Callable[[Path], bool]
 
 
 PROJECT_FILES = (
@@ -48,22 +49,42 @@ def nonempty_file(root: Path, *paths: str) -> bool:
     return any((root / path).is_file() and (root / path).stat().st_size > 0 for path in paths)
 
 
+def has_nonempty_dir(root: Path, *paths: str) -> bool:
+    return any((root / path).is_dir() and any((root / path).iterdir()) for path in paths)
+
+
 def has_workflow(root: Path) -> bool:
     directory = root / ".github" / "workflows"
     return directory.is_dir() and any(p.suffix in {".yml", ".yaml"} for p in directory.iterdir())
 
 
 def has_source(root: Path) -> bool:
-    if exists(root, *SOURCE_DIRS):
+    if has_nonempty_dir(root, *SOURCE_DIRS):
         return True
     extensions = {".py", ".js", ".ts", ".tsx", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".cs", ".rb", ".php"}
     ignored = {".git", ".venv", "venv", "node_modules", "dist", "build"}
     for path in root.rglob("*"):
         if any(part in ignored for part in path.parts):
             continue
-        if path.is_file() and path.suffix in extensions:
+        if path.is_file() and path.suffix in extensions and path.stat().st_size > 0:
             return True
     return False
+
+
+def has_ecosystem_lock(root: Path) -> bool:
+    """Check locks only where a conventional lockfile is meaningful."""
+    ecosystems = {
+        "pyproject.toml": ("poetry.lock", "uv.lock"),
+        "Pipfile": ("Pipfile.lock",),
+        "package.json": ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb"),
+        "go.mod": ("go.sum",),
+        "Cargo.toml": ("Cargo.lock",),
+        "composer.json": ("composer.lock",),
+    }
+    detected = [locks for project, locks in ecosystems.items() if (root / project).exists()]
+    if not detected:
+        return True
+    return any(any((root / lock).is_file() and (root / lock).stat().st_size > 0 for lock in locks) for locks in detected)
 
 
 def build_rules() -> tuple[Rule, ...]:
@@ -72,11 +93,11 @@ def build_rules() -> tuple[Rule, ...]:
         Rule("legal.license", "legal", "License", "high", "Add an open-source license.", lambda r: exists(r, "LICENSE", "LICENSE.md", "LICENSE.txt")),
         Rule("quality.gitignore", "quality", "Gitignore", "medium", "Add a .gitignore file.", lambda r: nonempty_file(r, ".gitignore")),
         Rule("security.env-template", "security", "Environment template", "high", "Document configuration without committing secrets.", lambda r: nonempty_file(r, ".env.example", ".env.sample", "env.example")),
-        Rule("testing.tests", "testing", "Automated tests", "high", "Add a test suite.", lambda r: exists(r, *TEST_DIRS)),
+        Rule("testing.tests", "testing", "Automated tests", "high", "Add a non-empty test suite.", lambda r: has_nonempty_dir(r, *TEST_DIRS)),
         Rule("delivery.ci", "delivery", "Continuous integration", "high", "Add a CI workflow.", has_workflow),
         Rule("project.metadata", "project", "Project metadata", "medium", "Add standard project metadata.", lambda r: exists(r, *PROJECT_FILES)),
-        Rule("dependencies.lock", "reliability", "Dependency lock", "medium", "Pin dependencies with a lockfile where the ecosystem supports it.", lambda r: exists(r, *LOCK_FILES)),
-        Rule("engineering.source", "engineering", "Source tree", "medium", "Include identifiable application/library source code.", has_source),
+        Rule("dependencies.lock", "reliability", "Dependency lock", "medium", "Use a lockfile when the detected ecosystem convention supports one.", has_ecosystem_lock),
+        Rule("engineering.source", "engineering", "Source tree", "medium", "Include identifiable, non-empty application/library source code.", has_source),
         Rule("documentation.security", "security", "Security policy", "medium", "Add SECURITY.md with responsible disclosure guidance.", lambda r: nonempty_file(r, "SECURITY.md")),
         Rule("community.contributing", "community", "Contribution guide", "low", "Add CONTRIBUTING.md to make contributions easier.", lambda r: nonempty_file(r, "CONTRIBUTING.md")),
         Rule("project.changelog", "release", "Changelog", "low", "Track user-visible changes in a changelog.", lambda r: exists(r, "CHANGELOG.md", "HISTORY.md", "CHANGES.md")),
@@ -84,11 +105,11 @@ def build_rules() -> tuple[Rule, ...]:
 
 
 def run_checks(root: Path) -> list[Check]:
-    checks: list[Check] = []
-    for rule in build_rules():
-        passed = bool(rule.predicate(root))
-        checks.append(Check(rule.id, rule.category, rule.name, passed, rule.severity, "Present" if passed else rule.detail))
-    return checks
+    return [
+        Check(rule.id, rule.category, rule.name, bool(rule.predicate(root)), rule.severity,
+              "Present" if rule.predicate(root) else rule.detail)
+        for rule in build_rules()
+    ]
 
 
 def score(checks: list[Check]) -> int:
