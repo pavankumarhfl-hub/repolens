@@ -33,10 +33,6 @@ PROJECT_FILES = (
     "pyproject.toml", "package.json", "go.mod", "Cargo.toml", "pom.xml",
     "build.gradle", "build.gradle.kts", "composer.json", "Gemfile", "mix.exs",
 )
-LOCK_FILES = (
-    "poetry.lock", "uv.lock", "Pipfile.lock", "package-lock.json", "npm-shrinkwrap.json",
-    "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "go.sum", "Cargo.lock", "composer.lock",
-)
 SOURCE_DIRS = ("src", "app", "lib", "cmd", "packages")
 TEST_DIRS = ("tests", "test", "spec")
 
@@ -72,9 +68,8 @@ def has_source(root: Path) -> bool:
 
 
 def has_ecosystem_lock(root: Path) -> bool:
-    """Check locks only where a conventional lockfile is meaningful."""
+    """Check lockfiles only for ecosystems with a conventional lock mechanism."""
     ecosystems = {
-        "pyproject.toml": ("poetry.lock", "uv.lock"),
         "Pipfile": ("Pipfile.lock",),
         "package.json": ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb"),
         "go.mod": ("go.sum",),
@@ -105,11 +100,11 @@ def build_rules() -> tuple[Rule, ...]:
 
 
 def run_checks(root: Path) -> list[Check]:
-    return [
-        Check(rule.id, rule.category, rule.name, bool(rule.predicate(root)), rule.severity,
-              "Present" if rule.predicate(root) else rule.detail)
-        for rule in build_rules()
-    ]
+    checks: list[Check] = []
+    for rule in build_rules():
+        passed = bool(rule.predicate(root))
+        checks.append(Check(rule.id, rule.category, rule.name, passed, rule.severity, "Present" if passed else rule.detail))
+    return checks
 
 
 def score(checks: list[Check]) -> int:
