@@ -41,26 +41,35 @@ Checks are weighted by severity: **high = 3, medium = 2, low = 1**.
 
 ## Quick start
 
+### Run from source
+
 ```bash
 python src/repolens.py /path/to/repository
+```
+
+### Install locally
+
+```bash
+python -m pip install .
+repolens /path/to/repository
 ```
 
 JSON for automation:
 
 ```bash
-python src/repolens.py /path/to/repository --format json
+repolens /path/to/repository --format json
 ```
 
 SARIF for code-scanning integrations:
 
 ```bash
-python src/repolens.py /path/to/repository --format sarif
+repolens /path/to/repository --format sarif
 ```
 
 Enforce a quality bar in CI:
 
 ```bash
-python src/repolens.py . --min-score 80
+repolens . --min-score 80
 ```
 
 ## GitHub Action
@@ -127,6 +136,12 @@ The rule reference is documented in `docs/rules.md`.
 3. **Safe by default** — inspection is read-only.
 4. **Composable output** — humans can read it; CI can consume it.
 5. **Language-agnostic foundation** — common repository conventions first.
+
+## Scope and limitations
+
+RepoLens 0.3 is intentionally a **structural engineering-health baseline**. It does not claim to understand every line of code, prove security, or replace code review, dependency scanners, test coverage tools, or static analysis. A passing score means the repository satisfies the configured structural signals — not that the software is production-safe.
+
+The roadmap expands these signals carefully rather than hiding complexity behind an opaque score.
 
 ## Roadmap
 
