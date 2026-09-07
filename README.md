@@ -4,6 +4,8 @@
 
 RepoLens turns a repository into a transparent engineering-health report. It evaluates maintainability signals across documentation, testing, delivery, security, project structure, dependencies, and release hygiene — without modifying the target repository.
 
+[![CI](https://github.com/pavankumarhfl-hub/repolens/actions/workflows/ci.yml/badge.svg)](https://github.com/pavankumarhfl-hub/repolens/actions/workflows/ci.yml)
+
 > **Build it. Inspect it. Improve it.**
 
 ## Why RepoLens?
@@ -39,8 +41,6 @@ Checks are weighted by severity: **high = 3, medium = 2, low = 1**.
 
 ## Quick start
 
-Run directly:
-
 ```bash
 python src/repolens.py /path/to/repository
 ```
@@ -51,17 +51,40 @@ JSON for automation:
 python src/repolens.py /path/to/repository --format json
 ```
 
-SARIF for security/code-scanning workflows:
+SARIF for code-scanning integrations:
 
 ```bash
 python src/repolens.py /path/to/repository --format sarif
 ```
 
-Fail a CI job when engineering health drops below a threshold:
+Enforce a quality bar in CI:
 
 ```bash
 python src/repolens.py . --min-score 80
 ```
+
+## GitHub Action
+
+Use RepoLens directly in another repository:
+
+```yaml
+name: Repository Health
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  repolens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pavankumarhfl-hub/repolens@main
+        with:
+          min-score: 80
+```
+
+The Action exposes the calculated score as an output and can fail the workflow when the configured threshold is not met.
 
 ## Example output
 
@@ -71,6 +94,31 @@ RepoLens 0.3.0 — score 83/100
 [PASS] HIGH   delivery       Continuous integration: Present
 [FAIL] MEDIUM documentation  README: Add a clear README.
 ```
+
+## Architecture
+
+```text
+Target repository
+       │
+       ▼
+   Rule engine
+       │
+       ├── Documentation
+       ├── Security
+       ├── Testing
+       ├── Delivery
+       ├── Reliability
+       └── Engineering
+       │
+       ▼
+ Weighted score
+       │
+       ├── Terminal
+       ├── JSON
+       └── SARIF
+```
+
+The rule reference is documented in `docs/rules.md`.
 
 ## Design principles
 
@@ -89,6 +137,7 @@ RepoLens 0.3.0 — score 83/100
 - [x] Minimum-score CI gate
 - [x] SARIF output
 - [x] Ecosystem-aware project/lockfile detection
+- [x] Reusable GitHub Action
 
 ### v0.4 — Deeper repository intelligence
 - [ ] Configurable rule packs
@@ -99,9 +148,8 @@ RepoLens 0.3.0 — score 83/100
 - [ ] Better false-positive controls
 
 ### v0.5 — Developer workflow
-- [ ] First-class GitHub Action
 - [ ] PR annotations
-- [ ] Score badge
+- [ ] Score badge generation
 - [ ] `repolens init` configuration
 - [ ] Release automation
 
@@ -118,7 +166,7 @@ python -m pip install pytest
 python -m pytest -q
 ```
 
-The project intentionally keeps runtime dependencies at zero.
+Runtime dependencies remain at zero.
 
 ## Contributing
 
