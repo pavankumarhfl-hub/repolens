@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: repolens
+        name: RepoLens repository health
+        entry: python -m repolens . --min-score 80
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
